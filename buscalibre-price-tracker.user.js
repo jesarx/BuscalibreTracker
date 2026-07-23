@@ -1,10 +1,11 @@
 // ==UserScript==
 // @name         Buscalibre Wishlist Price Tracker
 // @namespace    http://tampermonkey.net/
-// @version      2.4
-// @description  Rastrea el historial de precios de tu lista de deseos en Buscalibre, con alertas visuales de bajadas y mínimos históricos
+// @version      2.5
+// @description  Rastrea el historial de precios de tu lista de deseos en Buscalibre, con alertas visuales de bajadas y mínimos históricos, y muestra la gráfica en la página de cada libro rastreado
 // @author       Eduardo
 // @match        https://www.buscalibre.com.mx/v2/u/dashboard*
+// @match        https://www.buscalibre.com.mx/*/p/*
 // @grant        GM_setValue
 // @grant        GM_getValue
 // @require      https://cdn.jsdelivr.net/npm/chart.js@3.9.1/dist/chart.min.js
@@ -347,6 +348,91 @@
             </span>`;
     }
 
+    // Instancia una gráfica de líneas de Chart.js sobre un <canvas>.
+    // Compartida por la lista de deseos y la página de cada libro.
+    function buildLineChart(canvas, entries, lineColor, fillColor) {
+        const labels = entries.map(p => new Date(p.date + 'T12:00:00').toLocaleDateString('es-MX', { day: 'numeric', month: 'short' }));
+        const prices = entries.map(p => p.price);
+
+        // Color por punto: gris si no disponible, dorado si es el mínimo
+        const availValues = entries.filter(p => p.available !== false).map(p => p.price);
+        const minAvail = availValues.length ? Math.min(...availValues) : null;
+        const pointColors = entries.map(p => {
+            if (p.available === false) return COLORS.pointGray;
+            if (minAvail !== null && Math.abs(p.price - minAvail) < 0.005) return COLORS.pointMin;
+            return lineColor;
+        });
+        const pointRadii = entries.map(p =>
+            (p.available !== false && minAvail !== null && Math.abs(p.price - minAvail) < 0.005) ? 5 : 2.5
+        );
+
+        const ctx = canvas.getContext('2d');
+        return new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels,
+                datasets: [{
+                    label: 'Precio',
+                    data: prices,
+                    borderColor: lineColor,
+                    backgroundColor: fillColor,
+                    tension: 0.15,
+                    pointRadius: pointRadii,
+                    pointHoverRadius: 6,
+                    pointBackgroundColor: pointColors,
+                    pointBorderColor: pointColors,
+                    fill: true,
+                    borderWidth: 2,
+                }],
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                animation: { duration: 0 },
+                interaction: { intersect: false, mode: 'index' },
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        callbacks: {
+                            label: (context) => {
+                                const entry = entries[context.dataIndex];
+                                const parts = [formatPrice(context.parsed.y)];
+                                if (entry.available === false) parts.push('(no disponible)');
+                                if (context.dataIndex > 0) {
+                                    const prev = prices[context.dataIndex - 1];
+                                    const diff = context.parsed.y - prev;
+                                    if (Math.abs(diff) > 0.01) {
+                                        parts.push(`${diff > 0 ? '+' : '−'}${formatPrice(Math.abs(diff))} vs día anterior`);
+                                    }
+                                }
+                                return parts.join(' ');
+                            },
+                        },
+                    },
+                },
+                scales: {
+                    y: {
+                        beginAtZero: false,
+                        grace: '5%',
+                        ticks: {
+                            callback: (value) => formatPrice(value),
+                            font: { size: 10 },
+                        },
+                        grid: { color: 'rgba(0,0,0,0.05)' },
+                    },
+                    x: {
+                        ticks: {
+                            maxTicksLimit: 12,
+                            maxRotation: 45,
+                            font: { size: 9 },
+                        },
+                        grid: { display: false },
+                    },
+                },
+            },
+        });
+    }
+
     function createPriceChart(bookId, bookHistory, stats, unavailable, highlight) {
         // Fondo y borde del contenedor según el estado del libro
         let bg = '#fafafa', border = '#e8e8e8';
@@ -406,10 +492,6 @@
             container.appendChild(statsDiv);
         }
 
-        const entries = bookHistory.prices;
-        const labels = entries.map(p => new Date(p.date + 'T12:00:00').toLocaleDateString('es-MX', { day: 'numeric', month: 'short' }));
-        const prices = entries.map(p => p.price);
-
         // Colores de línea y relleno según el estado del libro
         const lineColor = unavailable ? COLORS.pointGray
             : highlight === 'atl' ? COLORS.low
@@ -418,86 +500,10 @@
             : highlight === 'atl' ? 'rgba(26, 122, 76, 0.15)'
             : COLORS.fill;
 
-        // Color por punto: gris si no disponible, dorado si es el mínimo
-        const availValues = entries.filter(p => p.available !== false).map(p => p.price);
-        const minAvail = availValues.length ? Math.min(...availValues) : null;
-        const pointColors = entries.map(p => {
-            if (p.available === false) return COLORS.pointGray;
-            if (minAvail !== null && Math.abs(p.price - minAvail) < 0.005) return COLORS.pointMin;
-            return lineColor;
-        });
-        const pointRadii = entries.map(p =>
-            (p.available !== false && minAvail !== null && Math.abs(p.price - minAvail) < 0.005) ? 5 : 2.5
-        );
-
         setTimeout(() => {
             try {
                 destroyExistingChart(bookId);
-                const ctx = canvas.getContext('2d');
-                const chart = new Chart(ctx, {
-                    type: 'line',
-                    data: {
-                        labels,
-                        datasets: [{
-                            label: 'Precio',
-                            data: prices,
-                            borderColor: lineColor,
-                            backgroundColor: fillColor,
-                            tension: 0.15,
-                            pointRadius: pointRadii,
-                            pointHoverRadius: 6,
-                            pointBackgroundColor: pointColors,
-                            pointBorderColor: pointColors,
-                            fill: true,
-                            borderWidth: 2,
-                        }],
-                    },
-                    options: {
-                        responsive: true,
-                        maintainAspectRatio: false,
-                        animation: { duration: 0 },
-                        interaction: { intersect: false, mode: 'index' },
-                        plugins: {
-                            legend: { display: false },
-                            tooltip: {
-                                callbacks: {
-                                    label: (context) => {
-                                        const entry = entries[context.dataIndex];
-                                        const parts = [formatPrice(context.parsed.y)];
-                                        if (entry.available === false) parts.push('(no disponible)');
-                                        if (context.dataIndex > 0) {
-                                            const prev = prices[context.dataIndex - 1];
-                                            const diff = context.parsed.y - prev;
-                                            if (Math.abs(diff) > 0.01) {
-                                                parts.push(`${diff > 0 ? '+' : '−'}${formatPrice(Math.abs(diff))} vs día anterior`);
-                                            }
-                                        }
-                                        return parts.join(' ');
-                                    },
-                                },
-                            },
-                        },
-                        scales: {
-                            y: {
-                                beginAtZero: false,
-                                grace: '5%',
-                                ticks: {
-                                    callback: (value) => formatPrice(value),
-                                    font: { size: 10 },
-                                },
-                                grid: { color: 'rgba(0,0,0,0.05)' },
-                            },
-                            x: {
-                                ticks: {
-                                    maxTicksLimit: 12,
-                                    maxRotation: 45,
-                                    font: { size: 9 },
-                                },
-                                grid: { display: false },
-                            },
-                        },
-                    },
-                });
+                const chart = buildLineChart(canvas, bookHistory.prices, lineColor, fillColor);
                 createdCharts.set(bookId, chart);
             } catch (error) {
                 console.error(`[PriceTracker] Error creando gráfica para ${bookId}:`, error);
@@ -797,13 +803,261 @@
         }
     }
 
-    injectStyles();
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', waitForWishlist);
-    } else {
-        waitForWishlist();
+    // ─────────────────────────────────────────────
+    // Página de cada libro (detalle del producto)
+    // ─────────────────────────────────────────────
+    const DETAIL_CHART_ID = 'bpt-detail-book'; // clave en createdCharts
+
+    function injectDetailStyles() {
+        if (document.getElementById('bpt-detail-styles')) return;
+        const style = document.createElement('style');
+        style.id = 'bpt-detail-styles';
+        style.textContent = `
+            #bpt-detail-card {
+                clear: both;
+                margin: 20px 0 40px;
+                padding: 16px 18px;
+                background: #fff;
+                border: 1px solid #ecebeb;
+                border-radius: 10px;
+                box-shadow: 0 1px 4px rgba(0,0,0,0.05);
+                color: #333;
+                box-sizing: border-box;
+            }
+            #bpt-detail-card * { box-sizing: border-box; }
+            #bpt-detail-card .bpt-detail-head {
+                display: flex;
+                align-items: baseline;
+                gap: 12px;
+                flex-wrap: wrap;
+                border-bottom: 1px solid #f0f0f0;
+                padding-bottom: 10px;
+                margin-bottom: 10px;
+            }
+            #bpt-detail-card .bpt-detail-title { font-size: 16px; font-weight: 600; color: #222; }
+            #bpt-detail-card .bpt-detail-sub { font-size: 12px; color: #ff5a00; font-weight: 500; }
+            #bpt-detail-card .bpt-detail-badges:empty { display: none; }
+            #bpt-detail-card .bpt-detail-badges { margin-bottom: 8px; }
+            #bpt-detail-card .bpt-detail-stats { font-size: 12px; line-height: 1.9; margin-bottom: 12px; }
+            #bpt-detail-card .bpt-detail-canvas-wrap { position: relative; width: 100%; height: 220px; }
+            #bpt-detail-card .bpt-detail-canvas-wrap canvas { width: 100% !important; height: 100% !important; }
+            #bpt-detail-card .bpt-detail-note { font-size: 12px; color: #888; margin-top: 10px; }
+            @media (max-width: 800px) {
+                #bpt-detail-card .bpt-detail-canvas-wrap { height: 180px; }
+            }
+        `;
+        (document.head || document.documentElement).appendChild(style);
     }
-    window.addEventListener('hashchange', onNavigate);
+
+    function getDetailBookId() {
+        const m = window.location.pathname.match(/\/p\/(\d+)/);
+        if (m) return m[1];
+        const meta = document.querySelector('meta[itemprop="productID"]');
+        return meta ? meta.getAttribute('content') : null;
+    }
+
+    // El precio visible del libro. La página nueva lo muestra dentro de la
+    // opción seleccionada; dejamos varios respaldos por si cambia el DOM.
+    function getDetailPrice() {
+        const selectors = [
+            '.opcionPrecio.selected .colPrecio .ped',
+            '.opcionForm .precio',
+            'section#producto p.precioAhora',
+            '.opcionPrecio .ped',
+        ];
+        for (const s of selectors) {
+            const el = document.querySelector(s);
+            if (el) {
+                const p = parsePrice(el.textContent);
+                if (p !== null) return p;
+            }
+        }
+        return null;
+    }
+
+    function getDetailTitle() {
+        const el = document.querySelector('.tituloProducto');
+        if (el && el.textContent.trim()) return el.textContent.trim();
+        const meta = document.querySelector('meta[name="title"]');
+        return meta ? meta.getAttribute('content') : null;
+    }
+
+    function isDetailUnavailable() {
+        // Sin botón de compra o con leyenda "agotado / no disponible" cerca
+        // del bloque de precio ⇒ el precio mostrado no es confiable.
+        const hasBuy = !!document.querySelector('#addToCart, .box-comprar button, form[action="/carro/agregar"] button');
+        const priceBox = document.querySelector('#detallePrecio');
+        if (priceBox && /agotado|no\s+disponible/i.test(priceBox.textContent)) return true;
+        return !hasBuy;
+    }
+
+    function highlightFromStats(stats) {
+        if (!stats || stats.count < CONFIG.minEntriesForBadges) return null;
+        if (stats.isAllTimeLow) return 'atl';
+        if (stats.vsAvg <= -CONFIG.dropThreshold) return 'drop';
+        return null;
+    }
+
+    function buildDetailCard(book, stats, highlight) {
+        const card = document.createElement('div');
+        card.id = 'bpt-detail-card';
+        if (highlight === 'atl') {
+            card.style.boxShadow = `inset 5px 0 0 ${COLORS.low}, 0 1px 4px rgba(0,0,0,0.05)`;
+        } else if (highlight === 'drop') {
+            card.style.boxShadow = `inset 5px 0 0 ${COLORS.drop}, 0 1px 4px rgba(0,0,0,0.05)`;
+        }
+
+        const head = document.createElement('div');
+        head.className = 'bpt-detail-head';
+        head.innerHTML =
+            '<span class="bpt-detail-title">📈 Historial de precios</span>' +
+            '<span class="bpt-detail-sub">Rastreado desde tu lista de deseos</span>';
+        card.appendChild(head);
+
+        // Insignias (mínimo histórico / bajada fuerte)
+        const badges = document.createElement('div');
+        badges.className = 'bpt-detail-badges';
+        if (stats && stats.count >= CONFIG.minEntriesForBadges) {
+            if (stats.isAllTimeLow) badges.appendChild(makeBadge('★ Mínimo histórico', COLORS.low));
+            if (stats.vsAvg <= -CONFIG.dropThreshold && !stats.isAllTimeLow) {
+                const pct = Math.round(Math.abs(stats.vsAvg) * 100);
+                badges.appendChild(makeBadge(`▼ ${pct}% bajo el promedio`, COLORS.drop));
+            }
+        }
+        card.appendChild(badges);
+
+        // Fila de estadísticas
+        if (stats) {
+            const statsDiv = document.createElement('div');
+            statsDiv.className = 'bpt-detail-stats';
+            const trendColor = stats.vsFirst < 0 ? COLORS.low : (stats.vsFirst > 0 ? COLORS.pointMax : '#444');
+            const trendArrow = stats.vsFirst < 0 ? '▼' : (stats.vsFirst > 0 ? '▲' : '—');
+            statsDiv.innerHTML =
+                statChip('Actual:', formatPrice(stats.current), stats.isAllTimeLow ? COLORS.low : '#222') +
+                statChip('Mín:', formatPrice(stats.min), COLORS.pointMin) +
+                statChip('Máx:', formatPrice(stats.max), COLORS.pointMax) +
+                statChip('Promedio:', formatPrice(stats.avg)) +
+                statChip('Tendencia:', `${trendArrow} ${Math.abs(Math.round(stats.vsFirst * 100))}%`, trendColor);
+            card.appendChild(statsDiv);
+        }
+
+        const entries = book.prices || [];
+        if (entries.length >= 2) {
+            const wrap = document.createElement('div');
+            wrap.className = 'bpt-detail-canvas-wrap';
+            const canvas = document.createElement('canvas');
+            canvas.id = 'bpt-detail-canvas';
+            wrap.appendChild(canvas);
+            card.appendChild(wrap);
+        }
+
+        // Nota al pie: cuántos registros llevamos y desde cuándo
+        const note = document.createElement('div');
+        note.className = 'bpt-detail-note';
+        if (entries.length >= 2) {
+            const first = entries[0].date;
+            const desde = new Date(first + 'T12:00:00').toLocaleDateString('es-MX', { day: 'numeric', month: 'long', year: 'numeric' });
+            note.textContent = `${entries.length} registros · rastreando desde el ${desde}`;
+        } else {
+            note.textContent = 'Aún estamos reuniendo datos de este libro. Abre tu lista de deseos de vez en cuando para sumar más puntos al historial.';
+        }
+        card.appendChild(note);
+
+        return card;
+    }
+
+    function renderBookDetailChart() {
+        const bookId = getDetailBookId();
+        if (!bookId) return;
+
+        const history = getPriceHistory();
+        const book = history[bookId];
+        // Sólo mostramos libros que ya rastreamos desde la lista de deseos
+        if (!book) return;
+
+        // Registramos/actualizamos el precio de hoy con lo que muestra la
+        // página del libro, para que el historial también avance al navegar.
+        const price = getDetailPrice();
+        if (price !== null) {
+            const unavailable = isDetailUnavailable();
+            const title = getDetailTitle();
+            if (title) book.title = title;
+            book.lastSeen = todayStr();
+            book.prices = book.prices || [];
+            const todayEntry = book.prices.find(p => p.date === todayStr());
+            if (!todayEntry) {
+                book.prices.push({ date: todayStr(), price, available: !unavailable });
+            } else {
+                todayEntry.price = price;
+                todayEntry.available = !unavailable;
+            }
+            book.prices.sort((a, b) => a.date.localeCompare(b.date));
+            savePriceHistory(history);
+        }
+
+        const stats = computeStats(book.prices || []);
+        const highlight = highlightFromStats(stats);
+
+        // Anclamos la tarjeta justo debajo del bloque del producto (estilo
+        // Keepa), un lugar visible pero que no estorba la compra.
+        const anchor = document.querySelector('#producto .product-info') || document.querySelector('#producto');
+        if (!anchor) return;
+
+        const previous = document.getElementById('bpt-detail-card');
+        if (previous) previous.remove();
+        destroyExistingChart(DETAIL_CHART_ID);
+
+        const card = buildDetailCard(book, stats, highlight);
+        anchor.insertAdjacentElement('afterend', card);
+
+        // Dibujamos la gráfica si hay al menos 2 registros
+        if ((book.prices || []).length >= 2) {
+            const canvas = card.querySelector('#bpt-detail-canvas');
+            const lineColor = highlight === 'atl' ? COLORS.low : COLORS.line;
+            const fillColor = highlight === 'atl' ? 'rgba(26, 122, 76, 0.15)' : COLORS.fill;
+            setTimeout(() => {
+                try {
+                    destroyExistingChart(DETAIL_CHART_ID);
+                    const chart = buildLineChart(canvas, book.prices, lineColor, fillColor);
+                    createdCharts.set(DETAIL_CHART_ID, chart);
+                } catch (error) {
+                    console.error('[PriceTracker] Error creando gráfica del libro:', error);
+                }
+            }, 150);
+        }
+    }
+
+    function initDetailPage() {
+        injectDetailStyles();
+        const run = () => {
+            try { renderBookDetailChart(); }
+            catch (e) { console.error('[PriceTracker]', e); }
+        };
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', run);
+        } else {
+            run();
+        }
+    }
+
+    // ─────────────────────────────────────────────
+    // Arranque: elegimos el modo según la página
+    // ─────────────────────────────────────────────
+    injectStyles();
+
+    const isDetailPage = /\/p\/\d+/.test(window.location.pathname);
+    const isDashboard = window.location.pathname.includes('/v2/u/dashboard');
+
+    if (isDetailPage && !isDashboard) {
+        initDetailPage();
+    } else {
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', waitForWishlist);
+        } else {
+            waitForWishlist();
+        }
+        window.addEventListener('hashchange', onNavigate);
+    }
 
     window.addEventListener('beforeunload', () => {
         createdCharts.forEach((_, id) => destroyExistingChart(id));

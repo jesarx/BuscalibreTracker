@@ -14,6 +14,10 @@ mismo los exportes).
 
 - 📈 **Gráfica de precios por libro** — evolución del precio con Chart.js,
   marcando el punto mínimo y los días en que el libro no estuvo disponible.
+- 🔎 **Gráfica en la página de cada libro** — cuando abres la página de un libro
+  que ya estás rastreando (guardado en tu lista de deseos), aparece su historial
+  de precios en una tarjeta debajo del bloque de compra, al estilo Keepa. La
+  visita también suma un punto al historial.
 - ★ **Alerta de mínimo histórico** — resalta en verde los libros que están en su
   precio más bajo registrado.
 - ▼ **Detección de bajadas fuertes** — marca en azul los libros cuyo precio actual
@@ -73,10 +77,14 @@ Los parámetros están al inicio del script, en el objeto `CONFIG`:
 
 ## Notas técnicas
 
-- Sólo actúa en `https://www.buscalibre.com.mx/v2/u/dashboard*`.
+- Actúa en el panel/lista de deseos (`https://www.buscalibre.com.mx/v2/u/dashboard*`)
+  y en la página de cada libro (`https://www.buscalibre.com.mx/*/p/*`).
+- En la página del libro identifica el producto por su ID (el `/p/<id>` de la URL,
+  que coincide con el `data-id_producto` de la lista de deseos) y sólo muestra la
+  gráfica si ese libro ya está en tu historial.
 - Depende de la estructura del DOM de Buscalibre (clases como `.productoLista`,
-  `.precioAhora`, `.add-cart`). Si el sitio cambia su maquetado, es posible que
-  haya que ajustar los selectores.
+  `.precioAhora`, `.add-cart`, `.opcionPrecio`, `#producto`). Si el sitio cambia
+  su maquetado, es posible que haya que ajustar los selectores.
 - Usa `GM_setValue` / `GM_getValue` para el almacenamiento y carga Chart.js 3.9.1
   vía `@require`.
 
