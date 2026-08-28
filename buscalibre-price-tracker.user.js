@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Buscalibre Wishlist Price Tracker
 // @namespace    http://tampermonkey.net/
-// @version      2.5
-// @description  Rastrea el historial de precios de tu lista de deseos en Buscalibre, con alertas visuales de bajadas y mínimos históricos, y muestra la gráfica en la página de cada libro rastreado
+// @version      2.6
+// @description  Rastrea el historial de precios de tu lista de deseos en Buscalibre, con alertas visuales de bajadas y mínimos históricos, ordenamiento por precio y gráfica en la página de cada libro
 // @author       Eduardo
 // @match        https://www.buscalibre.com.mx/v2/u/dashboard*
 // @match        https://www.buscalibre.com.mx/*/p/*
@@ -24,6 +24,7 @@
         dropThreshold: 0.15,        // bajada "sustancial": ≥15% por debajo del promedio
         minEntriesForBadges: 3,     // mínimo de registros antes de mostrar insignias
         unseenGraceDays: 45,        // días sin ver un libro antes de borrar su historial
+        sortStorageKey: 'buscalibre_sort_v1', // criterio de orden elegido
         debug: false,
     };
 
@@ -159,6 +160,65 @@
             @media (max-width: 700px) {
                 #bpt-summary .bpt-low-list { columns: 1; }
             }
+
+            /* ── Barra de orden ── */
+            #bpt-summary .bpt-sort-bar {
+                display: flex;
+                align-items: center;
+                flex-wrap: wrap;
+                gap: 6px;
+                margin-top: 10px;
+                padding-top: 10px;
+                border-top: 1px solid #f0f0f0;
+            }
+            #bpt-summary .bpt-sort-label {
+                font-weight: 600;
+                color: #555;
+                margin-right: 2px;
+            }
+            #bpt-summary .bpt-sort-btn {
+                padding: 5px 11px;
+                border: 1px solid #d8d8d8;
+                border-radius: 999px;
+                background: #fff;
+                color: #444;
+                cursor: pointer;
+                font-size: 12px;
+                line-height: 1.4;
+                font-family: inherit;
+                transition: all .15s ease;
+            }
+            #bpt-summary .bpt-sort-btn:hover {
+                border-color: #ff5a00;
+                color: #ff5a00;
+            }
+            #bpt-summary .bpt-sort-btn.bpt-sort-active {
+                background: #ff5a00;
+                border-color: #ff5a00;
+                color: #fff;
+                font-weight: 600;
+            }
+            /* Numeración de posición al ordenar (1., 2., 3. …) */
+            .productoLista.bpt-ranked { position: relative; }
+            .productoLista .bpt-rank {
+                position: absolute;
+                top: 6px;
+                left: 6px;
+                z-index: 3;
+                min-width: 22px;
+                height: 22px;
+                padding: 0 6px;
+                border-radius: 999px;
+                background: rgba(24, 43, 58, 0.85);
+                color: #fff;
+                font-size: 12px;
+                font-weight: 700;
+                line-height: 22px;
+                text-align: center;
+                pointer-events: none;
+            }
+            .productoLista.bpt-atl .bpt-rank { background: ${COLORS.low}; }
+            .productoLista.bpt-drop .bpt-rank { background: ${COLORS.drop}; }
         `;
         (document.head || document.documentElement).appendChild(style);
     }
@@ -515,6 +575,123 @@
     }
 
     // ─────────────────────────────────────────────
+    // Ordenamiento de las tarjetas
+    // ─────────────────────────────────────────────
+    // Reordenamos las tarjetas reales (no una lista aparte) para que el
+    // orden elegido conserve gráfica, insignias y botón de compra.
+    const SORTS = {
+        original: { label: 'Original', cmp: null },
+        priceAsc: { label: '💲 Precio ↑', cmp: (a, b) => a.price - b.price },
+        priceDesc: { label: '💲 Precio ↓', cmp: (a, b) => b.price - a.price },
+        // vsAvg es negativo cuando el precio está bajo el promedio:
+        // el más negativo (mayor bajada) va primero.
+        drop: { label: '▼ Mayor bajada', cmp: (a, b) => a.vsAvg - b.vsAvg },
+        vsMax: { label: '📉 Vs. su máximo', cmp: (a, b) => a.vsMax - b.vsMax },
+    };
+    const DEFAULT_SORT = 'original';
+
+    // Evita que nuestro propio reordenamiento dispare el MutationObserver
+    // y provoque un reproceso en bucle.
+    let suppressObserver = false;
+
+    function getSortKey() {
+        try {
+            const stored = GM_getValue(CONFIG.sortStorageKey, DEFAULT_SORT);
+            return SORTS[stored] ? stored : DEFAULT_SORT;
+        } catch (e) {
+            return DEFAULT_SORT;
+        }
+    }
+
+    function setSortKey(key) {
+        GM_setValue(CONFIG.sortStorageKey, SORTS[key] ? key : DEFAULT_SORT);
+    }
+
+    // Guarda en el dataset los valores por los que se puede ordenar.
+    function tagSortData(item, index, price, stats, unavailable) {
+        if (item.dataset.bptIndex === undefined) item.dataset.bptIndex = String(index);
+        item.dataset.bptPrice = String(price);
+        item.dataset.bptUnavail = unavailable ? '1' : '0';
+        item.dataset.bptVsavg = stats ? String(stats.vsAvg) : '0';
+        item.dataset.bptVsmax = stats && stats.max > 0
+            ? String((stats.current - stats.max) / stats.max)
+            : '0';
+    }
+
+    function readSortData(item, fallbackIndex) {
+        const num = (v, def) => {
+            const n = parseFloat(v);
+            return isNaN(n) ? def : n;
+        };
+        return {
+            el: item,
+            index: num(item.dataset.bptIndex, fallbackIndex),
+            price: num(item.dataset.bptPrice, Infinity),
+            vsAvg: num(item.dataset.bptVsavg, 0),
+            vsMax: num(item.dataset.bptVsmax, 0),
+            unavailable: item.dataset.bptUnavail === '1',
+            // Sin datos propios no puede competir en el orden: va al final.
+            untracked: item.dataset.bptPrice === undefined,
+        };
+    }
+
+    function applySort(key) {
+        const container = document.querySelector('.productosLista');
+        if (!container) return;
+
+        const cards = Array.from(container.children).filter(
+            el => el.classList && el.classList.contains('productoLista')
+        );
+        if (cards.length === 0) return;
+
+        const sortKey = SORTS[key] ? key : DEFAULT_SORT;
+        const cmp = SORTS[sortKey].cmp;
+        const rows = cards.map((el, i) => readSortData(el, i));
+
+        rows.sort((a, b) => {
+            // "Original" devuelve la lista tal cual la entrega el sitio,
+            // sin mover siquiera los agotados.
+            if (!cmp) return a.index - b.index;
+
+            // Con un criterio activo, los no rastreados y los no disponibles
+            // van al final: su precio no es comparable con el resto.
+            if (a.untracked !== b.untracked) return a.untracked ? 1 : -1;
+            if (a.unavailable !== b.unavailable) return a.unavailable ? 1 : -1;
+
+            if (!a.untracked && !a.unavailable) {
+                const r = cmp(a, b);
+                if (r !== 0) return r;
+            }
+            return a.index - b.index; // desempate: orden original
+        });
+
+        // Reordenar en el DOM. Mover un <canvas> conserva su contenido,
+        // así que las gráficas ya dibujadas sobreviven al cambio.
+        suppressObserver = true;
+        const frag = document.createDocumentFragment();
+        rows.forEach(r => frag.appendChild(r.el));
+        container.appendChild(frag);
+
+        // Numerar sólo cuando hay un orden aplicado
+        rows.forEach((r, i) => {
+            const old = r.el.querySelector('.bpt-rank');
+            if (old) old.remove();
+            r.el.classList.remove('bpt-ranked');
+
+            if (sortKey === DEFAULT_SORT || r.untracked || r.unavailable) return;
+            const badge = document.createElement('span');
+            badge.className = 'bpt-rank';
+            badge.textContent = String(i + 1);
+            r.el.classList.add('bpt-ranked');
+            r.el.appendChild(badge);
+        });
+
+        // Liberamos el observador en el siguiente tick, ya asentado el DOM
+        setTimeout(() => { suppressObserver = false; }, 0);
+        log(`Orden aplicado: ${sortKey}`);
+    }
+
+    // ─────────────────────────────────────────────
     // Panel de resumen (arriba de la lista)
     // ─────────────────────────────────────────────
     function renderSummaryPanel(container, summary) {
@@ -564,6 +741,15 @@
                </div>`
             : '';
 
+        const currentSort = getSortKey();
+        const sortHtml = `
+            <div class="bpt-sort-bar">
+                <span class="bpt-sort-label">Ordenar por:</span>
+                ${Object.entries(SORTS).map(([key, s]) => `
+                    <button class="bpt-sort-btn${key === currentSort ? ' bpt-sort-active' : ''}"
+                            data-sort="${key}">${s.label}</button>`).join('')}
+            </div>`;
+
         panel.innerHTML = `
             <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
                 <div>
@@ -580,10 +766,21 @@
             </div>
             ${lowsHtml}
             ${dropsHtml}
+            ${sortHtml}
         `;
 
         panel.querySelector('#bpt-export').addEventListener('click', exportHistory);
         panel.querySelector('#bpt-import').addEventListener('click', importHistory);
+
+        panel.querySelectorAll('.bpt-sort-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const key = btn.dataset.sort;
+                setSortKey(key);
+                panel.querySelectorAll('.bpt-sort-btn').forEach(b =>
+                    b.classList.toggle('bpt-sort-active', b === btn));
+                applySort(key);
+            });
+        });
 
         panel.querySelectorAll('.bpt-low-link, .bpt-drop-link').forEach(link => {
             link.addEventListener('click', (e) => {
@@ -664,7 +861,7 @@
         const bookItems = document.querySelectorAll('.productoLista');
         if (bookItems.length === 0) return;
 
-        bookItems.forEach((item) => {
+        bookItems.forEach((item, itemIndex) => {
             const bookId = item.getAttribute('data-id_producto');
             const priceElement = item.querySelector('.precioAhora');
             if (!bookId || !priceElement) return;
@@ -697,6 +894,7 @@
             // Estadísticas e insignias
             const stats = computeStats(book.prices);
             decorateItem(item, stats, unavailable);
+            tagSortData(item, itemIndex, price, stats, unavailable);
 
             // Tipo de resaltado (misma lógica que decorateItem)
             let highlight = null;
@@ -746,6 +944,10 @@
         const listContainer = document.querySelector('.productosLista');
         if (listContainer) renderSummaryPanel(listContainer, summary);
 
+        // Reaplicar el orden elegido: la lista pudo crecer (paginación) o
+        // pudieron cambiar los precios desde la última vez.
+        applySort(getSortKey());
+
         savePriceHistory(cleanHistory(history));
         log(`Rastreando ${summary.tracked} libros. Mínimos: ${summary.lows}, bajadas: ${summary.drops}`);
     }
@@ -775,6 +977,10 @@
                 setTimeout(processWishlistItems, 400);
 
                 const observer = new MutationObserver((mutations) => {
+                    // Nuestro propio reordenamiento mueve las tarjetas: no
+                    // debe contar como cambio externo (provocaría un bucle).
+                    if (suppressObserver) return;
+
                     // Ignorar mutaciones provocadas por nuestros propios elementos
                     const external = mutations.some(m =>
                         ![...m.addedNodes, ...m.removedNodes].every(n =>
