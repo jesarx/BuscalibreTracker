@@ -26,6 +26,11 @@ mismo los exportes).
   detectan y se excluyen de las estadísticas (sus precios suelen ser poco fiables).
 - 📚 **Panel de resumen** — arriba de la lista, con conteos y accesos directos a
   cada libro en mínimo histórico o con bajada fuerte (con destello al hacer clic).
+- ↕️ **Ordenar la lista de deseos** — botones en el panel para reordenar las
+  tarjetas completas (con su gráfica e insignias) por precio ascendente o
+  descendente, por mayor bajada respecto al promedio, o por mayor caída desde su
+  máximo histórico. Al ordenar, cada tarjeta se numera (1., 2., 3. …), así que
+  los 10 o 20 más baratos quedan arriba. El criterio se recuerda entre visitas.
 - 💾 **Exportar / Importar historial** — respaldo en JSON, con fusión inteligente
   al importar (sin duplicar registros por fecha).
 - 🔁 **Migración automática** desde el formato de almacenamiento de la v1.x.
@@ -74,6 +79,22 @@ Los parámetros están al inicio del script, en el objeto `CONFIG`:
 | `minEntriesForBadges` | `3`         | Registros mínimos antes de mostrar insignias.                      |
 | `unseenGraceDays`     | `45`        | Días sin ver un libro antes de borrar su historial.                |
 | `debug`               | `false`     | Activa logs detallados en la consola.                              |
+
+### Ordenar la lista
+
+En el panel de resumen, la barra **«Ordenar por»** reordena las tarjetas reales
+de la lista de deseos:
+
+| Criterio            | Qué hace                                                          |
+| ------------------- | ----------------------------------------------------------------- |
+| **Original**        | Deja la lista tal como la entrega Buscalibre.                     |
+| **💲 Precio ↑**      | De menor a mayor precio: los más baratos arriba.                  |
+| **💲 Precio ↓**      | De mayor a menor precio.                                          |
+| **▼ Mayor bajada**  | Los que más bajaron respecto a su precio promedio.                |
+| **📉 Vs. su máximo** | Los que más cayeron desde su máximo histórico (descuento real).   |
+
+Los libros **no disponibles** y los que aún no tienen historial se envían al
+final en cualquier orden (su precio no es comparable), y no se numeran.
 
 ## Notas técnicas
 
