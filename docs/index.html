@@ -1,0 +1,533 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Buscalibre Price Tracker — Rastrea precios de tu lista de deseos</title>
+<meta name="description" content="Userscript que rastrea el historial de precios de tu lista de deseos en Buscalibre México, con gráficas, alertas de mínimos históricos y ordenamiento por precio.">
+<meta property="og:title" content="Buscalibre Price Tracker">
+<meta property="og:description" content="Rastrea el historial de precios de tu lista de deseos en Buscalibre México. Gratis y todo local en tu navegador.">
+<meta property="og:type" content="website">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📈</text></svg>">
+<style>
+  :root {
+    --naranja: #ff5a00;
+    --naranja-osc: #d94300;
+    --azul: #182b3a;
+    --verde: #1a7a4c;
+    --azul-claro: #1d6fa5;
+    --texto: #23282d;
+    --suave: #667;
+    --borde: #e4e6e8;
+    --fondo: #ffffff;
+    --card: #ffffff;
+    --alt: #f7f8f9;
+    --radio: 12px;
+    --sombra: 0 1px 3px rgba(0,0,0,.06), 0 8px 24px rgba(0,0,0,.05);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --texto: #e8eaed; --suave: #9aa3ad; --borde: #2b3138;
+      --fondo: #14181c; --card: #1b2026; --alt: #20262d;
+      --sombra: 0 1px 3px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.3);
+    }
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--fondo);
+    color: var(--texto);
+    font: 16px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  }
+  a { color: var(--naranja); }
+  .wrap { max-width: 880px; margin: 0 auto; padding: 0 20px; }
+
+  /* ── Hero ── */
+  header.hero {
+    background: linear-gradient(160deg, var(--azul) 0%, #24405a 100%);
+    color: #fff;
+    padding: 56px 0 64px;
+    text-align: center;
+  }
+  .hero h1 {
+    margin: 0 0 10px;
+    font-size: clamp(28px, 6vw, 42px);
+    line-height: 1.15;
+    letter-spacing: -.5px;
+  }
+  .hero .emoji { font-size: 46px; display: block; margin-bottom: 12px; }
+  .hero p.lead {
+    margin: 0 auto 8px;
+    max-width: 560px;
+    font-size: clamp(15px, 2.6vw, 18px);
+    color: #cfd8e0;
+  }
+  .hero .meta { margin-top: 18px; font-size: 13px; color: #9fb0bf; }
+  .hero .meta span { margin: 0 8px; white-space: nowrap; }
+
+  /* ── Estado de instalación ── */
+  #estado {
+    margin: -34px auto 0;
+    max-width: 700px;
+    background: var(--card);
+    border: 1px solid var(--borde);
+    border-radius: var(--radio);
+    box-shadow: var(--sombra);
+    padding: 18px 20px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    flex-wrap: wrap;
+  }
+  #estado .icono { font-size: 26px; line-height: 1; }
+  #estado .txt { flex: 1 1 240px; min-width: 0; }
+  #estado .titulo { font-weight: 650; }
+  #estado .detalle { font-size: 14px; color: var(--suave); }
+  #estado.ok { border-color: rgba(26,122,76,.5); background: rgba(26,122,76,.07); }
+  #estado.upd { border-color: rgba(230,168,23,.6); background: rgba(230,168,23,.09); }
+
+  /* ── Secciones ── */
+  section { padding: 44px 0 8px; }
+  h2 { font-size: 22px; margin: 0 0 6px; letter-spacing: -.3px; }
+  .sub { color: var(--suave); margin: 0 0 22px; font-size: 15px; }
+
+  .paso {
+    display: flex; gap: 16px; align-items: flex-start;
+    margin-bottom: 14px;
+  }
+  .num {
+    flex: 0 0 32px; height: 32px; border-radius: 50%;
+    background: var(--naranja); color: #fff;
+    font-weight: 700; font-size: 15px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .paso .cuerpo { flex: 1 1 auto; min-width: 0; }
+  .paso h3 { margin: 4px 0 4px; font-size: 17px; }
+  .paso p { margin: 0 0 12px; color: var(--suave); font-size: 15px; }
+
+  /* ── Tarjetas de gestor ── */
+  .gestores { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; }
+  .gestor {
+    display: flex; align-items: center; gap: 12px;
+    padding: 14px 16px;
+    border: 1px solid var(--borde); border-radius: 10px;
+    background: var(--card); color: inherit; text-decoration: none;
+    transition: border-color .15s, transform .15s;
+    position: relative;
+  }
+  .gestor:hover { border-color: var(--naranja); transform: translateY(-1px); }
+  .gestor .g-nombre { font-weight: 600; }
+  .gestor .g-sub { font-size: 13px; color: var(--suave); }
+  .gestor .g-logo { font-size: 24px; }
+  .gestor.reco { border-color: var(--naranja); box-shadow: 0 0 0 3px rgba(255,90,0,.12); }
+  .gestor.reco::after {
+    content: "Recomendado para tu navegador";
+    position: absolute; top: -9px; left: 12px;
+    background: var(--naranja); color: #fff;
+    font-size: 10.5px; font-weight: 700; letter-spacing: .3px;
+    padding: 2px 8px; border-radius: 999px;
+  }
+
+  /* ── Botón instalar ── */
+  .cta { text-align: center; padding: 6px 0 4px; }
+  .btn {
+    display: inline-block;
+    background: var(--naranja); color: #fff;
+    font-size: 17px; font-weight: 650;
+    padding: 15px 34px; border-radius: 10px;
+    text-decoration: none;
+    box-shadow: 0 4px 14px rgba(255,90,0,.3);
+    transition: background .15s, transform .15s;
+  }
+  .btn:hover { background: var(--naranja-osc); transform: translateY(-1px); }
+  .btn .v { opacity: .85; font-weight: 500; font-size: 14px; }
+  .cta .pie { margin-top: 10px; font-size: 13.5px; color: var(--suave); }
+
+  /* ── Aviso ── */
+  .aviso {
+    background: var(--alt); border: 1px solid var(--borde);
+    border-left: 4px solid var(--naranja);
+    border-radius: 8px; padding: 12px 16px;
+    font-size: 14.5px; margin: 16px 0;
+  }
+  .aviso strong { color: var(--texto); }
+
+  /* ── Features ── */
+  .feats { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; }
+  .feat { background: var(--card); border: 1px solid var(--borde); border-radius: 10px; padding: 16px 18px; }
+  .feat h4 { margin: 0 0 4px; font-size: 15.5px; }
+  .feat p { margin: 0; font-size: 14px; color: var(--suave); }
+  .feat .ic { font-size: 20px; }
+
+  /* ── FAQ ── */
+  details {
+    border: 1px solid var(--borde); border-radius: 10px;
+    padding: 12px 16px; margin-bottom: 8px; background: var(--card);
+  }
+  details summary { cursor: pointer; font-weight: 600; font-size: 15.5px; }
+  details p { color: var(--suave); font-size: 14.5px; margin: 10px 0 2px; }
+  details[open] summary { margin-bottom: 2px; }
+
+  code {
+    background: var(--alt); padding: 2px 6px; border-radius: 5px;
+    font-size: 13px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    word-break: break-all;
+  }
+
+  footer {
+    margin-top: 48px; padding: 28px 0 40px;
+    border-top: 1px solid var(--borde);
+    text-align: center; color: var(--suave); font-size: 14px;
+  }
+  footer a { color: var(--suave); }
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap">
+    <span class="emoji">📈</span>
+    <h1>Buscalibre Price Tracker</h1>
+    <p class="lead">
+      Rastrea el historial de precios de tu lista de deseos en Buscalibre México.
+      Gráficas por libro, avisos de mínimo histórico y orden por precio.
+    </p>
+    <div class="meta">
+      <span>🔒 100% local en tu navegador</span>
+      <span>·</span>
+      <span>🆓 Gratis y de código abierto</span>
+      <span>·</span>
+      <span>📖 Licencia MIT</span>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+  <div id="estado">
+    <div class="icono" id="estado-icono">⏳</div>
+    <div class="txt">
+      <div class="titulo" id="estado-titulo">Comprobando si ya lo tienes instalado…</div>
+      <div class="detalle" id="estado-detalle">Un momento.</div>
+    </div>
+  </div>
+</div>
+
+<div class="wrap">
+
+  <section id="instalar">
+    <h2>Instalación</h2>
+    <p class="sub">Dos pasos. Si ya usas Tampermonkey o Violentmonkey, salta directo al paso 2.</p>
+
+    <div class="paso">
+      <div class="num">1</div>
+      <div class="cuerpo">
+        <h3>Instala un gestor de userscripts</h3>
+        <p>
+          Es una extensión que permite correr scripts como este. Solo se hace una vez.
+          Elige cualquiera de los dos:
+        </p>
+        <div class="gestores" id="gestores"></div>
+      </div>
+    </div>
+
+    <div class="paso">
+      <div class="num">2</div>
+      <div class="cuerpo">
+        <h3>Instala el script</h3>
+        <p>
+          Con el gestor ya instalado, haz clic en el botón. Se abrirá la pantalla de
+          instalación del gestor y solo tienes que confirmar.
+        </p>
+        <div class="cta">
+          <a class="btn" id="btn-instalar"
+             href="https://raw.githubusercontent.com/jesarx/BuscalibreTracker/main/buscalibre-price-tracker.user.js">
+             Instalar el script <span class="v" id="btn-version"></span>
+          </a>
+          <div class="pie" id="btn-pie">
+            Si en vez de la pantalla de instalación ves puro código de texto,
+            es que aún falta el paso 1.
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="aviso">
+      <strong>¿Y luego?</strong> Abre tu
+      <a href="https://www.buscalibre.com.mx/v2/u/dashboard#lista-deseos" target="_blank" rel="noopener">lista de deseos en Buscalibre</a>.
+      El script empieza a guardar precios desde esa primera visita; las gráficas aparecen
+      a partir del segundo día, cuando ya hay con qué comparar.
+    </div>
+  </section>
+
+  <section>
+    <h2>Qué hace</h2>
+    <p class="sub">Todo ocurre dentro de tu navegador, sin cuentas ni servidores.</p>
+    <div class="feats">
+      <div class="feat">
+        <div class="ic">📈</div>
+        <h4>Gráfica por libro</h4>
+        <p>La evolución del precio de cada libro, marcando su punto más bajo y los días en que no estuvo disponible.</p>
+      </div>
+      <div class="feat">
+        <div class="ic">★</div>
+        <h4>Aviso de mínimo histórico</h4>
+        <p>Resalta en verde los libros que están al precio más bajo que les hemos registrado.</p>
+      </div>
+      <div class="feat">
+        <div class="ic">▼</div>
+        <h4>Detección de bajadas</h4>
+        <p>Marca los libros que están 15% o más por debajo de su precio promedio.</p>
+      </div>
+      <div class="feat">
+        <div class="ic">↕️</div>
+        <h4>Ordenar por precio</h4>
+        <p>Reordena tu lista completa de menor a mayor precio, o por mayor bajada, y numera los resultados.</p>
+      </div>
+      <div class="feat">
+        <div class="ic">🔎</div>
+        <h4>Historial en cada libro</h4>
+        <p>Al abrir la página de un libro que rastreas, su historial aparece debajo del bloque de compra.</p>
+      </div>
+      <div class="feat">
+        <div class="ic">💾</div>
+        <h4>Exportar e importar</h4>
+        <p>Respalda tu historial en un archivo JSON y combínalo entre varias computadoras.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Preguntas frecuentes</h2>
+    <p class="sub">Lo que suele preguntarse antes de instalar.</p>
+
+    <details>
+      <summary>¿Se envían mis datos a algún servidor?</summary>
+      <p>
+        No. Todo el historial se guarda en el almacenamiento local de tu gestor de
+        userscripts y nunca sale de tu equipo. La única conexión externa es la descarga
+        de la librería Chart.js (desde jsDelivr) para dibujar las gráficas.
+      </p>
+    </details>
+
+    <details>
+      <summary>¿De dónde saca los precios?</summary>
+      <p>
+        De lo que ya se muestra en tu propia lista de deseos cuando la abres. El script
+        no consulta precios por su cuenta ni en segundo plano: el historial se va
+        construyendo con tus visitas. Entre más seguido la abras, más completa la gráfica.
+      </p>
+    </details>
+
+    <details>
+      <summary>¿Qué navegadores funcionan?</summary>
+      <p>
+        Cualquiera que soporte Tampermonkey o Violentmonkey: Chrome, Firefox, Edge, Brave,
+        Opera y Safari en escritorio. En móvil funciona con Firefox para Android; en iPhone
+        se puede con la app Userscripts para Safari.
+      </p>
+    </details>
+
+    <details>
+      <summary>¿Se actualiza solo?</summary>
+      <p>
+        Sí. El script declara su dirección de actualización, así que tu gestor busca
+        versiones nuevas por su cuenta y te avisa. También puedes forzar la revisión
+        desde el panel del gestor.
+      </p>
+    </details>
+
+    <details>
+      <summary>¿Funciona en Buscalibre de otros países?</summary>
+      <p>
+        Por ahora solo en <code>buscalibre.com.mx</code>. El resto de los sitios de
+        Buscalibre usan el mismo diseño, así que adaptarlo es cuestión de agregar sus
+        direcciones al script.
+      </p>
+    </details>
+
+    <details>
+      <summary>¿Cómo lo desinstalo?</summary>
+      <p>
+        Desde el panel de tu gestor de userscripts: en la lista de scripts instalados
+        puedes desactivarlo o eliminarlo. Antes conviene exportar tu historial si quieres
+        conservarlo.
+      </p>
+    </details>
+  </section>
+
+</div>
+
+<footer>
+  <div class="wrap">
+    <p>
+      Hecho por Eduardo ·
+      <a href="https://github.com/jesarx/BuscalibreTracker" target="_blank" rel="noopener">Código en GitHub</a> ·
+      <a href="https://github.com/jesarx/BuscalibreTracker/issues" target="_blank" rel="noopener">Reportar un problema</a>
+    </p>
+    <p style="font-size:13px;">
+      Proyecto independiente, sin relación con Buscalibre.
+    </p>
+  </div>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var REPO_RAW = 'https://raw.githubusercontent.com/jesarx/BuscalibreTracker/main/buscalibre-price-tracker.user.js';
+
+  // ── Paso 1: tarjetas de gestor según el navegador ──────────────────
+  function detectarNavegador() {
+    var ua = navigator.userAgent;
+    if (/Firefox\//.test(ua) && !/Seamonkey\//.test(ua)) return 'firefox';
+    if (/Edg\//.test(ua)) return 'edge';
+    if (/OPR\//.test(ua)) return 'opera';
+    if (/Chrome\//.test(ua) && !/Edg\/|OPR\//.test(ua)) return 'chrome';
+    if (/Safari\//.test(ua) && !/Chrome\//.test(ua)) return 'safari';
+    return 'otro';
+  }
+
+  // Enlaces por navegador. La página oficial de cada gestor sirve de
+  // respaldo: redirige a la tienda correcta según el navegador.
+  var TIENDAS = {
+    tampermonkey: {
+      chrome:  'https://chromewebstore.google.com/detail/tampermonkey/dhdgffkkebhmkfjojejmpbldmpobfkfo',
+      edge:    'https://microsoftedge.microsoft.com/addons/detail/tampermonkey/iikmkjmpaadaobahmlepeloendndfphd',
+      opera:   'https://chromewebstore.google.com/detail/tampermonkey/dhdgffkkebhmkfjojejmpbldmpobfkfo',
+      firefox: 'https://addons.mozilla.org/firefox/addon/tampermonkey/',
+      safari:  'https://apps.apple.com/app/tampermonkey/id1482490089',
+      otro:    'https://www.tampermonkey.net/'
+    },
+    violentmonkey: {
+      chrome:  'https://chromewebstore.google.com/detail/violentmonkey/jinjaccalgkegednnccohejagnlnfdag',
+      edge:    'https://microsoftedge.microsoft.com/addons/detail/violentmonkey/eeagobfjdenkkddmbclomhiblgggliao',
+      opera:   'https://chromewebstore.google.com/detail/violentmonkey/jinjaccalgkegednnccohejagnlnfdag',
+      firefox: 'https://addons.mozilla.org/firefox/addon/violentmonkey/',
+      safari:  'https://violentmonkey.github.io/get-it/',
+      otro:    'https://violentmonkey.github.io/get-it/'
+    }
+  };
+
+  var NOMBRE_NAV = {
+    chrome: 'Chrome', edge: 'Edge', opera: 'Opera',
+    firefox: 'Firefox', safari: 'Safari', otro: 'tu navegador'
+  };
+
+  var nav = detectarNavegador();
+  // En Safari recomendamos Tampermonkey; en el resto también, pero
+  // Violentmonkey es igual de válido y es totalmente libre.
+  var recomendado = 'tampermonkey';
+
+  var gestores = [
+    { id: 'tampermonkey',  logo: '🐒', nombre: 'Tampermonkey',  sub: 'El más popular' },
+    { id: 'violentmonkey', logo: '🙈', nombre: 'Violentmonkey', sub: 'Ligero y libre' }
+  ];
+
+  document.getElementById('gestores').innerHTML = gestores.map(function (g) {
+    var url = TIENDAS[g.id][nav] || TIENDAS[g.id].otro;
+    var reco = g.id === recomendado ? ' reco' : '';
+    return '<a class="gestor' + reco + '" href="' + url + '" target="_blank" rel="noopener">' +
+             '<span class="g-logo">' + g.logo + '</span>' +
+             '<span><span class="g-nombre">' + g.nombre + '</span><br>' +
+             '<span class="g-sub">' + g.sub + ' · para ' + NOMBRE_NAV[nav] + '</span></span>' +
+           '</a>';
+  }).join('');
+
+  // ── Estado: ¿ya está instalado el script? ──────────────────────────
+  // El script marca <html data-bpt-installed="X.Y"> cuando corre en esta
+  // página. Es la única señal fiable: no hay forma estándar de preguntarle
+  // al navegador si tiene un gestor de userscripts, así que solo podemos
+  // detectar con certeza NUESTRO script, no la extensión.
+  var elIcono   = document.getElementById('estado-icono');
+  var elTitulo  = document.getElementById('estado-titulo');
+  var elDetalle = document.getElementById('estado-detalle');
+  var elEstado  = document.getElementById('estado');
+  var elBtn     = document.getElementById('btn-instalar');
+  var elBtnVer  = document.getElementById('btn-version');
+  var elBtnPie  = document.getElementById('btn-pie');
+
+  var instalada = null;   // versión instalada, si la detectamos
+  var ultima    = null;   // última versión publicada
+  var resuelto  = false;
+
+  function versionInstalada() {
+    return document.documentElement.getAttribute('data-bpt-installed');
+  }
+
+  // Compara "2.10" > "2.9" correctamente (numérico por segmento).
+  function esMayor(a, b) {
+    var pa = String(a).split('.'), pb = String(b).split('.');
+    for (var i = 0; i < Math.max(pa.length, pb.length); i++) {
+      var na = parseInt(pa[i] || '0', 10), nb = parseInt(pb[i] || '0', 10);
+      if (isNaN(na)) na = 0;
+      if (isNaN(nb)) nb = 0;
+      if (na !== nb) return na > nb;
+    }
+    return false;
+  }
+
+  function pintar() {
+    if (instalada) {
+      if (ultima && esMayor(ultima, instalada)) {
+        elEstado.className = 'upd';
+        elIcono.textContent = '⬆️';
+        elTitulo.textContent = 'Tienes la versión ' + instalada + ' — hay una más nueva';
+        elDetalle.textContent = 'La versión ' + ultima + ' ya está disponible. Usa el botón para actualizar.';
+        elBtn.textContent = 'Actualizar a la ' + ultima;
+      } else {
+        elEstado.className = 'ok';
+        elIcono.textContent = '✅';
+        elTitulo.textContent = '¡Ya lo tienes instalado! (versión ' + instalada + ')';
+        elDetalle.innerHTML = 'Abre tu <a href="https://www.buscalibre.com.mx/v2/u/dashboard#lista-deseos" target="_blank" rel="noopener">lista de deseos</a> para verlo funcionando.';
+        elBtn.textContent = 'Reinstalar';
+        elBtnPie.textContent = 'Ya está instalado; solo necesitas esto si quieres forzar una reinstalación.';
+      }
+    } else {
+      elEstado.className = '';
+      elIcono.textContent = '📥';
+      elTitulo.textContent = 'Listo para instalar';
+      elDetalle.textContent = 'Sigue los dos pasos de abajo. Toma menos de un minuto.';
+      if (ultima) elBtnVer.textContent = 'v' + ultima;
+    }
+  }
+
+  function marcarInstalado(v) {
+    if (resuelto && instalada === v) return;
+    instalada = v;
+    resuelto = true;
+    pintar();
+  }
+
+  // 1) Evento inmediato, por si el script corre después que nosotros.
+  document.documentElement.addEventListener('bpt:installed', function () {
+    marcarInstalado(versionInstalada());
+  });
+
+  // 2) Sondeo corto, por si el script corrió antes de que engancháramos
+  //    el listener (el atributo ya estaría puesto). Los gestores corren
+  //    en document-idle, apenas después de este script, así que ~1 s
+  //    sobra; más allá solo se siente lento para quien no lo tiene.
+  var intentos = 0;
+  var reloj = setInterval(function () {
+    var v = versionInstalada();
+    if (v) { clearInterval(reloj); marcarInstalado(v); return; }
+    if (++intentos >= 10) {          // ~1 s
+      clearInterval(reloj);
+      if (!resuelto) { resuelto = true; pintar(); }
+    }
+  }, 100);
+
+  // 3) Última versión publicada, leída del propio .user.js.
+  fetch(REPO_RAW, { cache: 'no-store' })
+    .then(function (r) { return r.ok ? r.text() : Promise.reject(r.status); })
+    .then(function (txt) {
+      var m = txt.match(/^\/\/\s*@version\s+(\S+)/m);
+      if (m) { ultima = m[1]; pintar(); }
+    })
+    .catch(function () { /* sin red o repo privado: seguimos sin versión */ });
+})();
+</script>
+
+</body>
+</html>

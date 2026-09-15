@@ -37,14 +37,26 @@ mismo los exportes).
 
 ## Instalación
 
+**👉 La forma fácil: [jesarx.github.io/BuscalibreTracker](https://jesarx.github.io/BuscalibreTracker/)**
+
+Esa página detecta tu navegador, te enlaza al gestor correcto y te dice si ya
+tienes el script instalado (y si hay una versión más nueva).
+
+### A mano
+
 1. Instala un gestor de userscripts en tu navegador:
    - [Tampermonkey](https://www.tampermonkey.net/) (Chrome, Edge, Firefox, Safari), o
    - [Violentmonkey](https://violentmonkey.github.io/) (Chrome, Firefox, Edge).
-2. Abre el archivo [`buscalibre-price-tracker.user.js`](./buscalibre-price-tracker.user.js)
-   y haz clic en **Raw**. El gestor debería ofrecerte instalarlo automáticamente.
+2. Abre el [enlace de instalación directa][instalar]. El gestor mostrará su
+   pantalla de instalación.
+   - Si en vez de eso ves puro código, es que falta el paso 1.
    - Alternativamente, copia el contenido del archivo y pégalo en un script nuevo
      desde el panel del gestor.
 3. Confirma la instalación.
+
+El script declara `@updateURL`, así que tu gestor **busca actualizaciones solo**.
+
+[instalar]: https://raw.githubusercontent.com/jesarx/BuscalibreTracker/main/buscalibre-price-tracker.user.js
 
 ## Uso
 
@@ -108,6 +120,36 @@ final en cualquier orden (su precio no es comparable), y no se numeran.
   su maquetado, es posible que haya que ajustar los selectores.
 - Usa `GM_setValue` / `GM_getValue` para el almacenamiento y carga Chart.js 3.9.1
   vía `@require`.
+
+## Publicar la página de instalación
+
+La landing vive en [`docs/index.html`](./docs/index.html) y se publica con GitHub
+Pages. Para activarla:
+
+1. El repositorio debe ser **público**. GitHub Pages en repos privados requiere
+   un plan de pago, y `raw.githubusercontent.com` responde 404 a quien no tenga
+   acceso, así que el botón de instalar no funcionaría para nadie más.
+2. **Settings → Pages → Source: _Deploy from a branch_ → Branch: `main`,
+   carpeta `/docs`.** En un par de minutos queda en
+   `https://jesarx.github.io/BuscalibreTracker/`.
+
+La página no necesita build ni dependencias: es un solo HTML con su CSS y JS
+embebidos.
+
+### Cómo sabe la página si ya lo tienes instalado
+
+El userscript incluye `@match` para la propia landing. Cuando corre ahí, marca
+`<html data-bpt-installed="2.7">` y la página lo lee. Se usa un atributo del DOM
+y no `window.*` porque, al declarar `@grant`, el gestor ejecuta el script en un
+sandbox cuyo `window` **no** es el de la página; el DOM sí es compartido.
+
+Con eso se detecta con certeza **nuestro script**. Detectar si hay un *gestor*
+instalado (sin el script) no es posible de forma fiable en los navegadores
+actuales, así que la página simplemente presenta los dos pasos y deja que quien
+ya tenga gestor salte el primero.
+
+> Si algún día mueves la página a un dominio propio, agrega ese dominio al
+> `@match` del script para que la detección siga funcionando.
 
 ## Privacidad
 

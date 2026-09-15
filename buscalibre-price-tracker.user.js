@@ -1,11 +1,16 @@
 // ==UserScript==
 // @name         Buscalibre Wishlist Price Tracker
 // @namespace    http://tampermonkey.net/
-// @version      2.6
+// @version      2.7
 // @description  Rastrea el historial de precios de tu lista de deseos en Buscalibre, con alertas visuales de bajadas y mínimos históricos, ordenamiento por precio y gráfica en la página de cada libro
 // @author       Eduardo
+// @homepageURL  https://jesarx.github.io/BuscalibreTracker/
+// @supportURL   https://github.com/jesarx/BuscalibreTracker/issues
+// @downloadURL  https://raw.githubusercontent.com/jesarx/BuscalibreTracker/main/buscalibre-price-tracker.user.js
+// @updateURL    https://raw.githubusercontent.com/jesarx/BuscalibreTracker/main/buscalibre-price-tracker.user.js
 // @match        https://www.buscalibre.com.mx/v2/u/dashboard*
 // @match        https://www.buscalibre.com.mx/*/p/*
+// @match        https://jesarx.github.io/BuscalibreTracker/*
 // @grant        GM_setValue
 // @grant        GM_getValue
 // @require      https://cdn.jsdelivr.net/npm/chart.js@3.9.1/dist/chart.min.js
@@ -1247,8 +1252,41 @@
     }
 
     // ─────────────────────────────────────────────
+    // Página de instalación (GitHub Pages)
+    // ─────────────────────────────────────────────
+    // Le avisamos a la landing que el script ya está instalado y con qué
+    // versión. Marcamos el DOM en vez de usar window.*: con @grant el
+    // gestor corre el script en un sandbox cuyo window NO es el de la
+    // página, pero el DOM sí es compartido.
+    function announceInstallation() {
+        // GM_info siempre está disponible y trae la versión del encabezado,
+        // así no duplicamos el número de versión en el código.
+        const version = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) || 'desconocida';
+
+        const mark = () => {
+            const root = document.documentElement;
+            if (!root) return;
+            root.setAttribute('data-bpt-installed', version);
+            root.dispatchEvent(new CustomEvent('bpt:installed'));
+        };
+
+        mark();
+        // Si corrimos antes de que la landing enganchara su listener, el
+        // atributo ya quedó puesto y la página lo detecta por sondeo.
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', mark);
+        }
+        log('Anunciada la instalación a la landing, versión', version);
+    }
+
+    // ─────────────────────────────────────────────
     // Arranque: elegimos el modo según la página
     // ─────────────────────────────────────────────
+    if (window.location.hostname.endsWith('github.io')) {
+        announceInstallation();
+        return; // la landing no necesita nada más
+    }
+
     injectStyles();
 
     const isDetailPage = /\/p\/\d+/.test(window.location.pathname);
